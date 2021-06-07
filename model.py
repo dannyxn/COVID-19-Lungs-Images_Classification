@@ -1,4 +1,5 @@
 import tensorflow as tf
+from keras.callbacks import EarlyStopping
 from keras.layers.preprocessing.image_preprocessing import Rescaling
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -63,26 +64,30 @@ inputs = keras.Input(shape=(299, 299, 3))
 x = data_augmentation(inputs)
 x = Rescaling(1.0 / 255)(x)
 x = base_model(x, training=False)
-x = keras.layers.GlobalAveragePooling2D()(x)
-x = Dense(1024, activation='relu')(x)
+x = keras.layers.Flatten()(x)
 outputs = keras.layers.Dense(3, activation='softmax')(x)
 model = keras.Model(inputs, outputs)
 
-model.compile(optimizer=keras.optimizers.Adam(1e-3),
-              loss='categorical_crossentropy',
-              metrics='categorical_accuracy')
-model.fit(train_ds, epochs=1, validation_data=val_ds)  # Na razie 1 epoch, później zwiekszymy
+earlyStopping = EarlyStopping(monitor='val_loss', patience=10, verbose=0, mode='min')
+model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath='checkpoint.hdf5',
+    save_weights_only=True, monitor='val_accuracy', mode='max', save_best_only=True)
+
+model.compile(optimizer=keras.optimizers.Adam(1e-3), loss='categorical_crossentropy', metrics='categorical_accuracy')
+model.fit(train_ds, epochs=10, callbacks=[earlyStopping, model_checkpoint_callback])
 model.save('trained_model')
 
 # ---------------------- Fine tuning ----------------------
 # Odblokowujemy warstwy pretrenowanego modelu, zaczynając od 250-tej
-# to gwałtownie zwiększa dofitowanie
-for layer in model.layers[:249]:
-    layer.trainable = False
-for layer in model.layers[249:]:
+# # to gwałtownie zwiększa dofitowanie
+# for layer in model.layers[:249]:
+#     layer.trainable = False
+for layer in model.layers[:]:
     layer.trainable = True
+
+model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=f'final-checkpoint.hdf5',
+    save_weights_only=True, monitor='val_accuracy', mode='max', save_best_only=True)
 
 # Ponowny trening z niskim learning rate
 model.compile(optimizer=SGD(lr=0.0001, momentum=0.9), loss='categorical_crossentropy', metrics='categorical_accuracy')
-model.fit(train_ds, epochs=3, validation_data=val_ds)  # na razie 3 epochy, później wiecej
+model.fit(train_ds, epochs=20, validation_data=val_ds, callbacks=[earlyStopping, model_checkpoint_callback])  # na razie 3 epochy, później wiecej
 model.save('fine_tuned_model')
